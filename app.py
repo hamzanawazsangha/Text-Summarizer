@@ -8,6 +8,8 @@ from langchain_community.document_loaders import (
     Docx2txtLoader,
     YoutubeLoader
 )
+from transformers import pipeline
+from langchain_community.llms import HuggingFacePipeline
 import speech_recognition as sr
 from langdetect import detect
 from googletrans import Translator
@@ -37,12 +39,8 @@ HUGGINGFACEHUB_API_TOKEN = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
 # --- Model Loader ---
 @st.cache_resource
 def load_summarizer():
-    return HuggingFaceHub(
-        repo_id="facebook/bart-large-cnn",
-        huggingfacehub_api_token=HUGGINGFACEHUB_API_TOKEN,
-        model_kwargs={"temperature": 0, "max_length": 300}
-    )
-
+    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+    return HuggingFacePipeline(pipeline=summarizer)
 llm = load_summarizer()
 translator = Translator()
 
