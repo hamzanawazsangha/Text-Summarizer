@@ -1,0 +1,13 @@
+streamlit==1.35.0
+transformers==4.41.1
+torch>=2.0.0
+sentencepiece
+langdetect
+googletrans==4.0.0rc1
+beautifulsoup4
+requests
+youtube_transcript_api
+docx2txt
+PyPDF2
+SpeechRecognition
+pydub
