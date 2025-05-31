@@ -4,9 +4,9 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.llms import HuggingFaceHub
 from langchain_community.document_loaders import (
     WebBaseLoader,
-    YoutubeLoader,
     PyPDFLoader,
-    Docx2txtLoader
+    Docx2txtLoader,
+    YoutubeLoader
 )
 import speech_recognition as sr
 from langdetect import detect
@@ -52,7 +52,6 @@ def process_text(text, word_limit, mode="map_reduce"):
         return "❗ Please enter some text."
 
     try:
-        # Detect and translate non-English text
         language = detect(text)
         if language != 'en':
             text = translator.translate(text, src=language, dest='en').text
@@ -64,20 +63,16 @@ def process_text(text, word_limit, mode="map_reduce"):
         )
         texts = text_splitter.create_documents([text])
         
-        # Configure summarization chain
         chain = load_summarize_chain(
             llm,
             chain_type=mode.lower(),
             verbose=False
         )
-        
-        # Generate summary
         summary = chain.run(texts)
-        
-        # Translate back if needed
+
         if language != 'en':
             summary = translator.translate(summary, src='en', dest=language).text
-        
+
         return summary
     except Exception as e:
         return f"An error occurred: {str(e)}"
@@ -86,14 +81,16 @@ def process_text(text, word_limit, mode="map_reduce"):
 def handle_youtube(url):
     try:
         loader = YoutubeLoader.from_youtube_url(url, add_video_info=False)
-        return loader.load()[0].page_content
+        docs = loader.load()
+        return docs[0].page_content if docs else "Error: Unable to load transcript."
     except Exception as e:
         return f"Error: {str(e)}"
 
 def handle_web_url(url):
     try:
         loader = WebBaseLoader(url)
-        return loader.load()[0].page_content
+        docs = loader.load()
+        return docs[0].page_content if docs else "Error: No content found."
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -101,22 +98,28 @@ def handle_pdf(file):
     try:
         with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(file.getvalue())
-            loader = PyPDFLoader(tmp.name)
-            docs = loader.load()
-        os.unlink(tmp.name)
+            tmp_path = tmp.name
+        loader = PyPDFLoader(tmp_path)
+        docs = loader.load()
+        os.unlink(tmp_path)
         return "\n".join([doc.page_content for doc in docs])
     except Exception as e:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
         return f"Error: {str(e)}"
 
 def handle_docx(file):
     try:
         with NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             tmp.write(file.getvalue())
-            loader = Docx2txtLoader(tmp.name)
-            docs = loader.load()
-        os.unlink(tmp.name)
-        return docs[0].page_content
+            tmp_path = tmp.name
+        loader = Docx2txtLoader(tmp_path)
+        docs = loader.load()
+        os.unlink(tmp_path)
+        return docs[0].page_content if docs else "Error: No content found."
     except Exception as e:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
         return f"Error: {str(e)}"
 
 def handle_audio(file):
@@ -124,14 +127,15 @@ def handle_audio(file):
     try:
         with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
             tmp.write(file.getvalue())
-            with sr.AudioFile(tmp.name) as source:
-                audio_data = recognizer.record(source)
-                text = recognizer.recognize_google(audio_data)
-        os.unlink(tmp.name)
+            tmp_path = tmp.name
+        with sr.AudioFile(tmp_path) as source:
+            audio_data = recognizer.record(source)
+            text = recognizer.recognize_google(audio_data)
+        os.unlink(tmp_path)
         return text
     except Exception as e:
-        if os.path.exists(tmp.name):
-            os.unlink(tmp.name)
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
         return f"Error: {str(e)}"
 
 # --- UI Components ---
@@ -190,11 +194,9 @@ if submitted and input_text and not input_text.startswith("Error"):
             word_count, 
             mode="map_reduce" if mode == "Abstractive" else "stuff"
         )
-        
         st.subheader("📜 Generated Summary")
         st.write(result)
 
-        # Download button
         summary_bytes = io.BytesIO(result.encode("utf-8"))
         st.download_button(
             label="📂 Download Summary as TXT",
