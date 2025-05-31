@@ -1,206 +1,57 @@
-import streamlit as st
-from langchain.chains.summarize import load_summarize_chain
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.llms import HuggingFacePipeline
-from langchain_community.document_loaders import (
-    WebBaseLoader,
-    PyPDFLoader,
-    Docx2txtLoader,
-    YoutubeLoader
-)
-from transformers import pipeline
-import speech_recognition as sr
-from langdetect import detect
-from googletrans import Translator
-import io
 import os
-from tempfile import NamedTemporaryFile
+import streamlit as st
+from transformers import pipeline
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain.llms import HuggingFacePipeline
+from langchain_huggingface import HuggingFacePipeline  # Updated import
 
-# --- Page Setup ---
-st.set_page_config(
-    page_title="Universal Text Summarizer",
-    layout="wide",
-    page_icon="🧠",
-    initial_sidebar_state="expanded"
-)
+# Optional: Set user agent to avoid warning
+os.environ["USER_AGENT"] = "UniversalSummarizer/1.0"
 
-# --- Header with Logo ---
-col1, col2 = st.columns([1, 9])
-with col1:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/OpenAI_Logo.svg/512px-OpenAI_Logo.svg.png", width=60)
-with col2:
-    st.title("Universal Multilingual Text Summarizer")
-    st.caption("Built with 💡 LangChain, 🌐 Multilingual Support, and 🧠 Streamlit")
+# Set page config
+st.set_page_config(page_title="Universal Summarizer", layout="centered")
 
-# --- Environment Setup ---
-HUGGINGFACEHUB_API_TOKEN = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
+# Title
+st.title("📄 Universal Text Summarizer")
 
-# --- Model & Translator Loaders ---
+# Sidebar instructions
+st.sidebar.title("How to Use")
+st.sidebar.markdown("""
+1. Paste or type the text you want to summarize.
+2. Click the **Summarize** button.
+3. The summary will appear below!
+""")
+
+# Cache the summarizer model
 @st.cache_resource
 def load_summarizer():
-    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-    return HuggingFacePipeline(pipeline=summarizer)
+    summarizer_pipeline = pipeline("summarization", model="facebook/bart-large-cnn", device=-1)
+    return HuggingFacePipeline(pipeline=summarizer_pipeline)
 
-@st.cache_resource
-def load_translator():
-    return Translator()
+summarizer = load_summarizer()
 
-llm = load_summarizer()
-translator = load_translator()
-
-# --- Text Processing ---
-def process_text(text, word_limit, mode="map_reduce"):
-    if not text.strip():
-        return "❗ Please enter some text."
-
-    try:
-        language = detect(text)
-        if language != 'en':
-            text = translator.translate(text, src=language, dest='en').text
-
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        texts = text_splitter.create_documents([text])
-
-        chain = load_summarize_chain(llm, chain_type=mode.lower(), verbose=False)
-        summary = chain.run(texts)
-
-        if language != 'en':
-            summary = translator.translate(summary, src='en', dest=language).text
-
-        return summary
-    except Exception as e:
-        return f"An error occurred: {str(e)}"
-
-# --- Input Handlers ---
-def handle_youtube(url):
-    try:
-        loader = YoutubeLoader.from_youtube_url(url, add_video_info=False)
-        docs = loader.load()
-        return docs[0].page_content if docs else "Error: Unable to load transcript."
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-def handle_web_url(url):
-    try:
-        loader = WebBaseLoader(url)
-        docs = loader.load()
-        return docs[0].page_content if docs else "Error: No content found."
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-def handle_pdf(file):
-    try:
-        with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(file.getvalue())
-            tmp_path = tmp.name
-        loader = PyPDFLoader(tmp_path)
-        docs = loader.load()
-        return "\n".join([doc.page_content for doc in docs])
-    except Exception as e:
-        return f"Error: {str(e)}"
-    finally:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-
-def handle_docx(file):
-    try:
-        with NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-            tmp.write(file.getvalue())
-            tmp_path = tmp.name
-        loader = Docx2txtLoader(tmp_path)
-        docs = loader.load()
-        return docs[0].page_content if docs else "Error: No content found."
-    except Exception as e:
-        return f"Error: {str(e)}"
-    finally:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-
-def handle_audio(file):
-    recognizer = sr.Recognizer()
-    try:
-        with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(file.getvalue())
-            tmp_path = tmp.name
-        with sr.AudioFile(tmp_path) as source:
-            audio_data = recognizer.record(source)
-            text = recognizer.recognize_google(audio_data)
-        return text
-    except Exception as e:
-        return f"Error: {str(e)}"
-    finally:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-
-# --- UI Components ---
-st.sidebar.header("Upload Options")
-input_option = st.sidebar.selectbox(
-    "Choose input type:",
-    ["Text", "YouTube URL", "Article URL", "PDF", "DOCX", "Audio"]
+# Prompt template for chaining
+prompt_template = PromptTemplate(
+    input_variables=["text"],
+    template="Summarize this:\n\n{text}\n\nSummary:"
 )
 
-input_text = ""
+# Create chain
+summarization_chain = LLMChain(
+    llm=summarizer,
+    prompt=prompt_template
+)
 
-if input_option == "Text":
-    input_text = st.text_area("📝 Enter text to summarize (any language):", height=300)
+# User input
+user_input = st.text_area("Enter the text to summarize:", height=300)
 
-elif input_option == "YouTube URL":
-    video_url = st.text_input("🎥 Enter YouTube Video URL:")
-    if video_url:
-        input_text = handle_youtube(video_url)
-        if not input_text.startswith("Error"):
-            st.success("YouTube transcript loaded successfully!")
-
-elif input_option == "Article URL":
-    article_url = st.text_input("📖 Enter Web Article URL:")
-    if article_url:
-        input_text = handle_web_url(article_url)
-        if not input_text.startswith("Error"):
-            st.success("Article content loaded successfully!")
-
-elif input_option == "PDF":
-    uploaded_pdf = st.file_uploader("📄 Upload PDF File", type=["pdf"])
-    if uploaded_pdf:
-        input_text = handle_pdf(uploaded_pdf)
-        if not input_text.startswith("Error"):
-            st.success("PDF content loaded successfully!")
-
-elif input_option == "DOCX":
-    uploaded_docx = st.file_uploader("📄 Upload DOCX File", type=["docx"])
-    if uploaded_docx:
-        input_text = handle_docx(uploaded_docx)
-        if not input_text.startswith("Error"):
-            st.success("DOCX content loaded successfully!")
-
-elif input_option == "Audio":
-    uploaded_audio = st.file_uploader("🔊 Upload Audio File (WAV only)", type=["wav"])
-    if uploaded_audio:
-        input_text = handle_audio(uploaded_audio)
-        if not input_text.startswith("Error"):
-            st.success("Audio transcribed successfully!")
-
-if input_text and input_text.startswith("Error"):
-    st.error(input_text)
-
-# --- Summarization Controls ---
-word_count = st.slider("✂️ Desired summary length (words):", 20, 300, 100, step=10)
-mode = st.radio("🧠 Choose summarization type:", ["Abstractive", "Extractive"], horizontal=True)
-submitted = st.button("🔍 Summarize")
-
-if submitted and input_text and not input_text.startswith("Error"):
-    with st.spinner("Summarizing... please wait..."):
-        result = process_text(
-            input_text,
-            word_count,
-            mode="map_reduce" if mode == "Abstractive" else "stuff"
-        )
-        st.subheader("📜 Generated Summary")
-        st.write(result)
-
-        summary_bytes = io.BytesIO(result.encode("utf-8"))
-        st.download_button(
-            label="📂 Download Summary as TXT",
-            data=summary_bytes,
-            file_name="summary.txt",
-            mime="text/plain"
-        )
+# Button to summarize
+if st.button("🔍 Summarize"):
+    if user_input.strip():
+        with st.spinner("Generating summary..."):
+            result = summarization_chain.run(user_input)
+            st.subheader("📝 Summary")
+            st.success(result)
+    else:
+        st.warning("Please enter some text before summarizing.")
