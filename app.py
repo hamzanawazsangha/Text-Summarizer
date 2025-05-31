@@ -1,7 +1,7 @@
 import streamlit as st
 from langchain.chains.summarize import load_summarize_chain
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.llms import HuggingFaceHub
+from langchain_community.llms import HuggingFacePipeline
 from langchain_community.document_loaders import (
     WebBaseLoader,
     PyPDFLoader,
@@ -9,7 +9,6 @@ from langchain_community.document_loaders import (
     YoutubeLoader
 )
 from transformers import pipeline
-from langchain_community.llms import HuggingFacePipeline
 import speech_recognition as sr
 from langdetect import detect
 from googletrans import Translator
@@ -36,13 +35,18 @@ with col2:
 # --- Environment Setup ---
 HUGGINGFACEHUB_API_TOKEN = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
 
-# --- Model Loader ---
+# --- Model & Translator Loaders ---
 @st.cache_resource
 def load_summarizer():
     summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
     return HuggingFacePipeline(pipeline=summarizer)
+
+@st.cache_resource
+def load_translator():
+    return Translator()
+
 llm = load_summarizer()
-translator = Translator()
+translator = load_translator()
 
 # --- Text Processing ---
 def process_text(text, word_limit, mode="map_reduce"):
@@ -54,18 +58,10 @@ def process_text(text, word_limit, mode="map_reduce"):
         if language != 'en':
             text = translator.translate(text, src=language, dest='en').text
 
-        # Split text into chunks
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         texts = text_splitter.create_documents([text])
-        
-        chain = load_summarize_chain(
-            llm,
-            chain_type=mode.lower(),
-            verbose=False
-        )
+
+        chain = load_summarize_chain(llm, chain_type=mode.lower(), verbose=False)
         summary = chain.run(texts)
 
         if language != 'en':
@@ -99,12 +95,12 @@ def handle_pdf(file):
             tmp_path = tmp.name
         loader = PyPDFLoader(tmp_path)
         docs = loader.load()
-        os.unlink(tmp_path)
         return "\n".join([doc.page_content for doc in docs])
     except Exception as e:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
         return f"Error: {str(e)}"
+    finally:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 def handle_docx(file):
     try:
@@ -113,12 +109,12 @@ def handle_docx(file):
             tmp_path = tmp.name
         loader = Docx2txtLoader(tmp_path)
         docs = loader.load()
-        os.unlink(tmp_path)
         return docs[0].page_content if docs else "Error: No content found."
     except Exception as e:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
         return f"Error: {str(e)}"
+    finally:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 def handle_audio(file):
     recognizer = sr.Recognizer()
@@ -129,17 +125,17 @@ def handle_audio(file):
         with sr.AudioFile(tmp_path) as source:
             audio_data = recognizer.record(source)
             text = recognizer.recognize_google(audio_data)
-        os.unlink(tmp_path)
         return text
     except Exception as e:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
         return f"Error: {str(e)}"
+    finally:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 # --- UI Components ---
 st.sidebar.header("Upload Options")
 input_option = st.sidebar.selectbox(
-    "Choose input type:", 
+    "Choose input type:",
     ["Text", "YouTube URL", "Article URL", "PDF", "DOCX", "Audio"]
 )
 
@@ -147,32 +143,37 @@ input_text = ""
 
 if input_option == "Text":
     input_text = st.text_area("📝 Enter text to summarize (any language):", height=300)
+
 elif input_option == "YouTube URL":
     video_url = st.text_input("🎥 Enter YouTube Video URL:")
     if video_url:
         input_text = handle_youtube(video_url)
         if not input_text.startswith("Error"):
             st.success("YouTube transcript loaded successfully!")
+
 elif input_option == "Article URL":
     article_url = st.text_input("📖 Enter Web Article URL:")
     if article_url:
         input_text = handle_web_url(article_url)
         if not input_text.startswith("Error"):
             st.success("Article content loaded successfully!")
+
 elif input_option == "PDF":
-    uploaded_pdf = st.file_uploader("Upload PDF File", type=["pdf"])
+    uploaded_pdf = st.file_uploader("📄 Upload PDF File", type=["pdf"])
     if uploaded_pdf:
         input_text = handle_pdf(uploaded_pdf)
         if not input_text.startswith("Error"):
             st.success("PDF content loaded successfully!")
+
 elif input_option == "DOCX":
-    uploaded_docx = st.file_uploader("Upload DOCX File", type=["docx"])
+    uploaded_docx = st.file_uploader("📄 Upload DOCX File", type=["docx"])
     if uploaded_docx:
         input_text = handle_docx(uploaded_docx)
         if not input_text.startswith("Error"):
             st.success("DOCX content loaded successfully!")
+
 elif input_option == "Audio":
-    uploaded_audio = st.file_uploader("Upload Audio File (WAV only)", type=["wav"])
+    uploaded_audio = st.file_uploader("🔊 Upload Audio File (WAV only)", type=["wav"])
     if uploaded_audio:
         input_text = handle_audio(uploaded_audio)
         if not input_text.startswith("Error"):
@@ -181,6 +182,7 @@ elif input_option == "Audio":
 if input_text and input_text.startswith("Error"):
     st.error(input_text)
 
+# --- Summarization Controls ---
 word_count = st.slider("✂️ Desired summary length (words):", 20, 300, 100, step=10)
 mode = st.radio("🧠 Choose summarization type:", ["Abstractive", "Extractive"], horizontal=True)
 submitted = st.button("🔍 Summarize")
@@ -188,8 +190,8 @@ submitted = st.button("🔍 Summarize")
 if submitted and input_text and not input_text.startswith("Error"):
     with st.spinner("Summarizing... please wait..."):
         result = process_text(
-            input_text, 
-            word_count, 
+            input_text,
+            word_count,
             mode="map_reduce" if mode == "Abstractive" else "stuff"
         )
         st.subheader("📜 Generated Summary")
