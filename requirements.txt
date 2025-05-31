@@ -10,3 +10,4 @@ SpeechRecognition>=3.10.0
 youtube-transcript-api>=0.6.1
 beautifulsoup4>=4.12.2
 pydub>=0.25.1
+transformer
