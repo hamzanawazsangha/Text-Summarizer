@@ -1,15 +1,25 @@
 import os
-import streamlit as st
+import sys
 import torch
+import types
+
+# Safe workaround for torch.classes RuntimeError in Streamlit
+if not hasattr(torch, "classes") or isinstance(torch.classes, types.ModuleType):
+    class _TorchClassesMock:
+        def __getattr__(self, name):
+            return None
+    sys.modules["torch.classes"] = _TorchClassesMock()
+
+import streamlit as st
 from transformers import pipeline
 from langchain_core.prompts import PromptTemplate
-from langchain_community.llms import HuggingFacePipeline
+from langchain_huggingface import HuggingFacePipeline  # Updated import
 from langchain_core.runnables import RunnableSequence
 
-# Set custom user agent to avoid warning
+# Optional: avoid USER_AGENT warning
 os.environ["USER_AGENT"] = "UniversalSummarizer/1.0"
 
-# Streamlit page configuration
+# Streamlit page config
 st.set_page_config(page_title="Universal Summarizer", layout="centered")
 st.title("📄 Universal Text Summarizer")
 
@@ -36,20 +46,14 @@ def load_model():
     )
     return HuggingFacePipeline(pipeline=summarizer)
 
-# Load model
 llm = load_model()
-
-# Setup summarization prompt
 prompt = PromptTemplate.from_template("Summarize this:\n\n{text}\n\nSummary:")
 summarization_chain = prompt | llm
 
-# 3000 words ≈ 22,000 characters
-MAX_CHARS = 22000
+MAX_CHARS = 22000  # Approx. 3000 words
 
-# Input text box
 text = st.text_area("Enter the text to summarize (up to 3000 words):", height=400)
 
-# Button to trigger summarization
 if st.button("🔍 Summarize"):
     if text.strip():
         if len(text) > MAX_CHARS:
