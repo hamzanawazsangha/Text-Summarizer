@@ -1,19 +1,14 @@
 import os
 import sys
 import torch
-import types
 
-# Safe workaround for torch.classes RuntimeError in Streamlit
-if not hasattr(torch, "classes") or isinstance(torch.classes, types.ModuleType):
-    class _TorchClassesMock:
-        def __getattr__(self, name):
-            return None
-    sys.modules["torch.classes"] = _TorchClassesMock()
+# Temporary fix for streamlit-torch path error
+sys.modules["torch.classes"] = None
 
 import streamlit as st
 from transformers import pipeline
 from langchain_core.prompts import PromptTemplate
-from langchain_huggingface import HuggingFacePipeline  # Updated import
+from langchain_huggingface import HuggingFacePipeline
 from langchain_core.runnables import RunnableSequence
 
 # Optional: avoid USER_AGENT warning
@@ -36,7 +31,7 @@ def load_model():
         "summarization",
         model="allenai/led-large-16384",
         tokenizer="allenai/led-large-16384",
-        device=-1,  # CPU
+        device=-1,  # CPU only
         framework="pt",
         torch_dtype=torch.float32,
         truncation=True,
@@ -50,7 +45,7 @@ llm = load_model()
 prompt = PromptTemplate.from_template("Summarize this:\n\n{text}\n\nSummary:")
 summarization_chain = prompt | llm
 
-MAX_CHARS = 22000  # Approx. 3000 words
+MAX_CHARS = 22000
 
 text = st.text_area("Enter the text to summarize (up to 3000 words):", height=400)
 
