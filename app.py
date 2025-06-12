@@ -25,19 +25,15 @@ st.sidebar.markdown("""
 3. View the summary below.
 """)
 
+# Load summarization pipeline using a simpler and robust model
 @st.cache_resource
 def load_model():
     summarizer = pipeline(
         "summarization",
-        model="allenai/led-large-16384",
-        tokenizer="allenai/led-large-16384",
-        device=-1,  # CPU only
-        framework="pt",
-        torch_dtype=torch.float32,
-        truncation=True,
-        max_length=512,
-        min_length=30,
-        do_sample=False,
+        model="sshleifer/distilbart-cnn-12-6",  # Simpler, works without special handling
+        tokenizer="sshleifer/distilbart-cnn-12-6",
+        device=-1,
+        framework="pt"
     )
     return HuggingFacePipeline(pipeline=summarizer)
 
@@ -45,18 +41,25 @@ llm = load_model()
 prompt = PromptTemplate.from_template("Summarize this:\n\n{text}\n\nSummary:")
 summarization_chain = prompt | llm
 
-MAX_CHARS = 22000
+MAX_CHARS = 4000  # Lowered for safety with tokenizer limits
 
+# Input text box
 text = st.text_area("Enter the text to summarize (up to 3000 words):", height=400)
 
+# Summarize button
 if st.button("🔍 Summarize"):
     if text.strip():
         if len(text) > MAX_CHARS:
-            st.warning(f"Input too long ({len(text)} characters). Truncating to first {MAX_CHARS} characters (~3000 words).")
+            st.warning(f"Input too long ({len(text)} characters). Truncating to first {MAX_CHARS} characters.")
             text = text[:MAX_CHARS]
         with st.spinner("Summarizing..."):
-            result = summarization_chain.invoke({"text": text})
-            st.subheader("📝 Summary")
-            st.success(result)
+            try:
+                result = summarization_chain.invoke({"text": text})
+                # If the result is a dict (as it often is), extract summary text
+                summary = result if isinstance(result, str) else result.get("text", str(result))
+                st.subheader("📝 Summary")
+                st.success(summary)
+            except Exception as e:
+                st.error(f"An error occurred during summarization: {e}")
     else:
         st.warning("Please enter some text before summarizing.")
